@@ -16,6 +16,17 @@ The count goes up where a client joins the client list in audioopen() and
 down where it leaves the list in audioclose().  Both run in process
 context on a uniprocessor kernel, so a plain int is enough.
 
+/dev/audio (c 46,0) is one STREAMS device, not a clone: every process
+that opens it shares one stream.  STREAMS calls audioopen() on every
+open() of that stream but audioclose() only on its last close, and the
+stock audioopen() gives each call a new client and points the stream at
+it.  A second opener therefore took the first one's stream over, and
+once counted here, it was never counted down: audio_nopen stuck at 1 and
+/dev/paula refused everyone until a reboot (2026-10-27, a test probe
+opening /dev/audio while mikmod played).  So audioopen() now refuses a
+stream that is already open (EBUSY): one client at a time, which is all
+one stream can carry, and the count stays exact.
+
 The source is Commodore's and is not in this repository; every edit
 asserts the text it replaces.
 """
@@ -42,7 +53,8 @@ s = sub(s, "static struct audio_client audio_clients;\n",
         "audio_clients declaration")
 s = sub(s, "    if (sflag == MODOPEN)\n\treturn EINVAL;\n",
         "    if (sflag == MODOPEN)\n\treturn EINVAL;\n"
-        "    if (paula_busy)\n\treturn EBUSY;\n",
+        "    if (paula_busy)\n\treturn EBUSY;\n"
+        "    if (q->q_ptr != NULL)\t/* the one stream is someone's already */\n\treturn EBUSY;\n",
         "audioopen MODOPEN test")
 s = sub(s, "    audio_clients.next = acl;\n    splx(s);\n",
         "    audio_clients.next = acl;\n    audio_nopen++;\n    splx(s);\n",
